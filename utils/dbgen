@@ -1,0 +1,18 @@
+#!/bin/bash
+[[ $# -lt 1 ]] && {
+	echo -e "Usage: \n\n\t$0 <dbname> [username]\n\t$0 <dbname> [username] | tee | dsh mariadb mysql\n"
+	exit 1
+}
+
+dbusername=${2:-$1}
+
+GENPW=$(dd if=/dev/urandom bs=1 count=512 2>/dev/null | sha1sum | head -c 24)
+
+echo "CREATE DATABASE $1;"
+echo "GRANT ALL on $1.* TO $dbusername@'172.20.0.0/255.255.0.0' IDENTIFIED BY '${GENPW}';"
+echo "FLUSH PRIVILEGES;"
+
+echo "DB: $1 USER: $dbusername PW: ${GENPW}" >&2
+
+
+

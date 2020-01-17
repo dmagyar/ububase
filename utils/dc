@@ -1,0 +1,4 @@
+#!/bin/bash
+SP="/root/docker"
+echo BUILDFUNC=$(cat ${SP}/lib/buildfuncs.sh | base64 | tr -d '\n') > $SP/.env
+exec docker-compose -f /root/docker-compose.yml --project-directory $SP $@

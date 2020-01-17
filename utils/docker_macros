@@ -1,0 +1,131 @@
+fpid() {
+#!/bin/bash
+
+if [ $# == 0 ]; then
+  echo "Usage $(basename $0) <pid>" >&2
+  exit 1
+fi
+
+param=$1
+renum='^[0-9]+$'
+rehex='^[0-9a-fA-F]+$'
+sectioner=$(printf %72s | tr " " "=")
+
+if ! [[ $param =~ $renum ]] ; then
+  echo "Error: $param is not a number" >&2
+  exit 2
+fi
+
+if [ ! -d "/proc/$param" ]; then
+  echo "No process running with PID $param"
+  exit 3
+fi
+
+# Print ps info
+echo $sectioner
+ps uww -p $param
+echo $sectioner
+
+# Print NSPid or exit if none
+nspid=$(cat /proc/$1/status | grep -i "^nspid")
+if [ -z "$nspid" ]; then
+  echo "No namespace PID for $param"
+  exit 4
+fi
+
+nspid=`echo $nspid | sed -E 's/^nspid:\s*[[:digit:]]+\s+([[:digit:]]+).*/\1/gi'`
+if ! [[ $nspid =~ $renum ]]; then
+  echo "No additional namespace PID for $param"
+  exit 5
+fi
+echo "PID in namespace: $nspid"
+echo $sectioner
+
+pid=$param
+i="0"
+while [ $i -lt 10 ]; do
+  ppid=$(ps -o ppid= -p $pid)
+  command=$(ps ww -o command= -p $pid)
+  printf "$i: %5s (parent: %5s) %s\n" "$pid" "$ppid" "$command"
+  containerid=$(echo $command | egrep -o "/moby/[0-9a-fA-F]+ ")
+  if [ ! -z "$containerid" ]; then
+    containerid=$(echo $containerid | sed "s/^\/moby\///" )
+    echo $sectioner
+    printf "Container name is: "
+    docker inspect --format='{{.Name}}' $containerid
+    echo $sectioner
+    break
+  fi
+  pid=$ppid
+  if [ $pid -eq 1 ]; then
+    break
+  fi
+  i=$[$i+1]
+done
+
+if [ $i -eq 10 ]; then
+  echo "Too much recursion... Giving up..."
+  exit 6
+fi
+}
+
+dstat () {
+	(
+		echo $'ID\tNAME\tIP\t MEMORY'
+		docker ps --no-trunc --format '{{.ID}}:{{.Names}}' | while IFS=: read id name
+		do
+			ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $id)
+			mem=$(cat /sys/fs/cgroup/memory/docker/$id/memory.usage_in_bytes)
+			if ((mem > 536870912))
+			then
+				mem=$((mem/1073741824))
+				sfx=G
+			elif ((mem > 524288))
+			then
+				mem=$((mem/1048576))
+				sfx=M
+			elif ((mem > 512))
+			then
+				mem=$((mem/1024))
+				sfx=k
+			else
+				sfx=""
+			fi
+			printf "%12s\t%s\t\t%s\t%6.1f%s\n" "${id:0:12}" "$name" "${ip:-N/A}" "$mem" "$sfx"
+		done
+	) | column -s $'\t' -t
+}
+
+dclean () {
+	docker rm $(docker ps -q -f status=exited)
+	docker rmi $(docker images | grep -e "^<none" | sed 's/  */ /g' | cut -d " " -f 3)
+}
+
+dsh () {
+	if [ "$#" = "0" ]; then
+        	echo -e "Usage: dsh <container-name> [command]\n"
+		return
+	fi
+
+	term=
+
+	if [ -t 1 ] && [ -t 0 ]; then
+        	term=-t
+	fi
+
+	if [ "$#" = "1" ]; then
+        	docker exec $term -i $1 /bin/bash -i
+		return
+	fi
+
+	instance=$1
+	shift
+
+	docker exec $term -i $instance "$@"
+	return
+}
+
+alias dip=dstat
+alias dps='docker ps --format "table {{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Status}}"'
+
+

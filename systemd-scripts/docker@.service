@@ -1,0 +1,13 @@
+[Unit]
+Description=Docker container for %i
+After=docker.service consul.service consul-template.service haproxy.service
+
+[Install]
+WantedBy=multi-user.target
+
+[Service]
+ExecStart=/usr/bin/docker start -a %i
+ExecStop=/usr/bin/docker stop -t 120 %i
+Restart=always
+RestartSec=30s
+
